@@ -7,10 +7,58 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=20261020-subject-mode" />
+  <link rel="stylesheet" href="style.css?v=20261020-auth-fix" />
+  <!-- Google Identity Services Library -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
-<body class="light-theme consent-required">
+<body class="light-theme consent-required auth-active">
 
+  <!-- STANDALONE LOGIN PAGE VIEW -->
+  <section id="auth-screen" class="auth-page">
+    <div class="auth-panel">
+      <div class="auth-brand">
+        <img src="logo.jpg" alt="SAPC Logo" class="auth-logo" onerror="this.src='https://sapc.edu.ph/favicon.ico'; this.onerror=null;" />
+        <h2>San Antonio de Padua College</h2>
+      </div>
+      
+      <p class="auth-eyebrow">Student Portal</p>
+      <h1 id="auth-title">Welcome Paduan</h1>
+      <p class="auth-intro">Sign in to access your AI flashcard reviewer workspace.</p>
+
+      <form id="auth-form" class="auth-form">
+        <input type="text" id="auth-username" placeholder="Username or Email" required />
+        <input type="password" id="auth-password" placeholder="Password" required />
+
+        <p id="auth-error" class="auth-error hidden" role="alert"></p>
+
+        <div class="auth-actions">
+          <button type="submit" id="auth-submit-btn" class="primary-btn">Log In</button>
+          <button type="button" id="auth-switch-btn" class="ghost">Register</button>
+        </div>
+      </form>
+
+      <div class="auth-divider">
+        <span>OR</span>
+      </div>
+
+      <!-- GOOGLE SIGN-IN BUTTON CONTAINER -->
+      <div id="g_id_onload"
+           data-client_id="831508871993-j7egn200ai4uvbqabkuka6s66juaikes.apps.googleusercontent.com"
+           data-callback="handleGoogleSignIn"
+           data-auto_prompt="false">
+      </div>
+      <div class="g_id_signin"
+           data-type="standard"
+           data-shape="rectangular"
+           data-theme="outline"
+           data-text="sign_in_with"
+           data-size="large"
+           data-logo_alignment="left">
+      </div>
+    </div>
+  </section>
+
+  <!-- PROTOTYPE CONSENT NOTICE SCREEN -->
   <section id="consent-screen" class="consent-screen" aria-labelledby="consent-title">
     <div class="consent-panel">
       <p class="consent-eyebrow">Prototype use notice</p>
@@ -58,6 +106,13 @@
       </div>
 
       <div class="nav-actions">
+        <!-- USER PROFILE PILL -->
+        <div id="user-profile" class="user-profile hidden">
+          <span class="user-avatar" id="user-avatar">P</span>
+          <span id="user-name-display" class="user-name">Paduan</span>
+          <button id="logout-btn" class="logout-btn" type="button" title="Log Out">Log Out</button>
+        </div>
+
         <button id="nav-launch-btn" class="nav-accent-btn">Launch Reviewer →</button>
         <button id="theme-toggle" class="icon-btn" title="Toggle Theme" aria-label="Toggle Theme">
           <span id="theme-label" class="btn-text">Dark</span>
@@ -108,7 +163,7 @@
     <section class="features-section" id="features-anchor">
       <div class="section-header">
         <h2>Designed for Smarter Studying</h2>
-        <p>Everything you need to master your subjects before exams or quizes.</p>
+        <p>Everything you need to master your subjects before exams or quizzes.</p>
       </div>
 
       <div class="features-grid">
@@ -208,12 +263,12 @@
               <button id="export-cards-btn" class="compact-btn" type="button">Export JSON</button>
               <button id="import-cards-btn" class="compact-btn" type="button">Import JSON</button>
               <button id="delete-card-btn" class="compact-btn danger" type="button">Delete card</button>
+              <button id="clear-all-cards-btn" class="compact-btn danger" type="button">Delete all cards</button>
             </div>
           </details>
         </div>
 
-        <!-- Hidden file input for JSON import -->
-        <input type="file" id="import-file-input" accept=".json" class="hidden" />
+        <input type="file" id="import-file-input" accept=".json,application/json" class="hidden" />
 
         <div class="card" id="card">
           <div class="card-inner">
@@ -234,7 +289,7 @@
 
     <!-- RIGHT SIDE: TARGET CONTROLS & ACADEMIC STRAND DETAILS SIDEBAR -->
     <aside class="sidebar-panel">
-      <!-- Grade Level Selection Widget -->
+      <!-- Grade Level Selection -->
       <div class="side-card">
         <h3>Grade Level</h3>
         <p class="side-sub">Select student deployment tier:</p>
@@ -244,40 +299,17 @@
         </div>
       </div>
 
-       <!-- RIGHT SIDE: TARGET CONTROLS & ACADEMIC STRAND DETAILS SIDEBAR -->
-    <aside class="sidebar-panel">
-
-      <!-- Grade Level Selection -->
-      <div class="side-card">
-        <h3>Grade Level</h3>
-        <p class="side-sub">Select student deployment tier:</p>
-
-        <div class="selection-grid" id="grade-container">
-          <button type="button" class="selector-badge active"
-            data-value="Grade 11" aria-pressed="true">Grade 11</button>
-          <button type="button" class="selector-badge"
-            data-value="Grade 12" aria-pressed="false">Grade 12</button>
-        </div>
-      </div>
-
       <!-- Academic Strand Selection -->
       <div class="side-card">
         <h3>Academic Strand</h3>
         <p class="side-sub">Target testing focus for reviewer:</p>
-
         <div class="selection-grid" id="strand-container">
-          <button type="button" class="selector-badge active"
-            data-value="STEM" aria-pressed="true">STEM</button>
-          <button type="button" class="selector-badge"
-            data-value="ABM" aria-pressed="false">ABM</button>
-          <button type="button" class="selector-badge"
-            data-value="HUMSS" aria-pressed="false">HUMSS</button>
-          <button type="button" class="selector-badge"
-            data-value="TVL-ICT" aria-pressed="false">TVL-ICT</button>
-          <button type="button" class="selector-badge"
-            data-value="TVL-HE" aria-pressed="false">TVL-HE</button>
+          <button type="button" class="selector-badge active" data-value="STEM" aria-pressed="true">STEM</button>
+          <button type="button" class="selector-badge" data-value="ABM" aria-pressed="false">ABM</button>
+          <button type="button" class="selector-badge" data-value="HUMSS" aria-pressed="false">HUMSS</button>
+          <button type="button" class="selector-badge" data-value="TVL-ICT" aria-pressed="false">TVL-ICT</button>
+          <button type="button" class="selector-badge" data-value="TVL-HE" aria-pressed="false">TVL-HE</button>
         </div>
-
         <p id="selection-summary" class="selection-summary" aria-live="polite">
           Generating for Grade 11 / STEM (General)
         </p>
@@ -301,10 +333,8 @@
           <li>Click <kbd>Import JSON</kbd> and select a saved JSON file to restore flashcards.</li>
         </ul>
       </div>
-
     </aside>
   </main>
-
 
   <!-- MODAL DIALOG: FLASHCARD CREATOR / EDITOR -->
   <div id="card-modal" class="modal hidden">
@@ -344,6 +374,8 @@
             <option value="C">C</option>
             <option value="D">D</option>
           </select>
+          <label for="modal-mc-explanation">Explanation (optional):</label>
+          <textarea id="modal-mc-explanation" rows="3" placeholder="Explain why this option is correct..."></textarea>
         </div>
 
         <div class="custom-card-fields" data-card-type="enumeration">
@@ -368,7 +400,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=20261020-subject-mode"></script>
+  <script src="app.js?v=20261020-auth-fix"></script>
 
 </body>
 </html>

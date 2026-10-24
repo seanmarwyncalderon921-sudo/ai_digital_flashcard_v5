@@ -128,7 +128,130 @@ if (themeToggle) {
   });
 }
 
-// --- 3. Subject API Mode Switcher ---
+// --- 3. Authentication & User Session Management ---
+let isRegisterMode = false;
+const authScreen = getElement("auth-screen");
+const authForm = getElement("auth-form");
+const authTitle = getElement("auth-title");
+const authSubmitBtn = getElement("auth-submit-btn");
+const authSwitchBtn = getElement("auth-switch-btn");
+const authError = getElement("auth-error");
+
+function updateProfileUI(username) {
+  const userProfile = getElement("user-profile");
+  const userNameDisplay = getElement("user-name-display");
+  const userAvatar = getElement("user-avatar");
+
+  if (!userProfile) return;
+
+  if (username) {
+    userNameDisplay.textContent = username;
+    userAvatar.textContent = username.charAt(0).toUpperCase();
+    userProfile.classList.remove("hidden");
+  } else {
+    userProfile.classList.add("hidden");
+  }
+}
+
+function checkAuthSession() {
+  const savedToken = localStorage.getItem("sapc_auth_token");
+  const savedUsername = localStorage.getItem("sapc_username");
+
+  if (savedToken && authScreen) {
+    authScreen.classList.add("hidden");
+    document.body.classList.remove("auth-active");
+    updateProfileUI(savedUsername || "Paduan");
+  } else if (authScreen) {
+    authScreen.classList.remove("hidden");
+    document.body.classList.add("auth-active");
+    updateProfileUI(null);
+  }
+}
+
+// Check session state on startup
+checkAuthSession();
+
+// Logout Button Handler
+const logoutBtn = getElement("logout-btn");
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", () => {
+    localStorage.removeItem("sapc_auth_token");
+    localStorage.removeItem("sapc_username");
+    checkAuthSession();
+  });
+}
+
+if (authSwitchBtn) {
+  authSwitchBtn.addEventListener("click", () => {
+    isRegisterMode = !isRegisterMode;
+    authTitle.textContent = isRegisterMode ? "Create Account" : "Welcome Paduan";
+    authSubmitBtn.textContent = isRegisterMode ? "Sign Up" : "Log In";
+    authSwitchBtn.textContent = isRegisterMode ? "Switch to Login" : "Register";
+    authError.classList.add("hidden");
+  });
+}
+
+if (authForm) {
+  authForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    authError.classList.add("hidden");
+
+    const username = getElement("auth-username").value.trim();
+    const password = getElement("auth-password").value.trim();
+    const endpoint = isRegisterMode ? "/api/auth/register" : "/api/auth/login";
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Authentication failed");
+
+      if (isRegisterMode) {
+        alert("Registration successful! Please log in.");
+        isRegisterMode = false;
+        authTitle.textContent = "Welcome Paduan";
+        authSubmitBtn.textContent = "Log In";
+        authSwitchBtn.textContent = "Register";
+      } else {
+        localStorage.setItem("sapc_auth_token", data.token);
+        localStorage.setItem("sapc_username", data.username);
+        checkAuthSession();
+      }
+    } catch (err) {
+      authError.textContent = err.message;
+      authError.classList.remove("hidden");
+    }
+  });
+}
+
+// --- Google Sign-In Global Callback ---
+async function handleGoogleSignIn(response) {
+  try {
+    const res = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: response.credential })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Google login failed");
+
+    localStorage.setItem("sapc_auth_token", data.token);
+    localStorage.setItem("sapc_username", data.username);
+    checkAuthSession();
+  } catch (err) {
+    alert("Google Login Error: " + err.message);
+  }
+}
+
+// Attach Google Callback to Window
+window.handleGoogleSignIn = handleGoogleSignIn;
+
+// --- 4. Subject API Mode Switcher ---
 document.querySelectorAll("#subject-mode-container .subject-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("#subject-mode-container .subject-btn").forEach(b => {
@@ -140,7 +263,7 @@ document.querySelectorAll("#subject-mode-container .subject-btn").forEach(btn =>
   });
 });
 
-// --- 4. Image Previews & Drag-and-Drop ---
+// --- 5. Image Previews & Drag-and-Drop ---
 const imageInput = getElement("image");
 const uploadDropZone = getElement("upload-drop-zone");
 const imagePreviewUrls = new Map();
@@ -296,6 +419,10 @@ function attachChoiceFeedback(choiceButtons) {
       choiceButtons.forEach(choice => { choice.disabled = true; });
       if (option.dataset.correct === "true") {
         option.classList.add("correct");
+        choiceFlipTimeout = setTimeout(() => {
+          getElement("card").classList.add("flipped");
+          choiceFlipTimeout = null;
+        }, 850);
         return;
       }
 
@@ -397,10 +524,9 @@ if (getElement("generate")) {
 
 function cleanQuestionDisplay(text) {
   if (!text) return "";
-  let cleaned = text.split(/(?:tama\s*(?:o|\/)?\s*mali|true\s*(?:or|\/)?\s*false|tamamali|truefalse|\b(tama|mali|true|false)\b)/i)[0];
-
-  return cleaned
+  return text
     .replace(/^(\s*(true\s*(or|\/)?\s*false|tama\s*(o|\/)?\s*mali|t\s*\/\s*f)\s*[:.-]?\s*)+/gi, '')
+    .replace(/[\s(--]*\b(true\s*(or|\/)?\s*false|tama\s*(o|\/)?\s*mali|t\s*\/\s*f)\b[\s)]*$/gi, '')
     .replace(/[\s.:\-?]+$/, '?')
     .trim();
 }
@@ -436,13 +562,15 @@ function show() {
     front.append(question);
 
     const cleanText = cleanQuestionDisplay(cards[i].question);
-    typeWriter(question, cleanText);
+    typeWriter(question, cleanText || cards[i].question);
 
     const options = document.createElement("div");
     options.className = "choice-options true-false-options";
-    const correctAnswer = normalizeTypedAnswer(cards[i].answer);
-    
-    const isFilipinoAnswer = /^(tama|mali)$/i.test(cards[i].answer.trim());
+
+    const rawAnswerMatch = cards[i].answer.trim().match(/^(true|false|tama|mali)/i);
+    const correctAnswer = rawAnswerMatch ? rawAnswerMatch[1].toLowerCase() : normalizeTypedAnswer(cards[i].answer);
+
+    const isFilipinoAnswer = rawAnswerMatch && /^(tama|mali)$/i.test(rawAnswerMatch[1]);
     const labels = isFilipinoAnswer ? ["Tama", "Mali"] : ["True", "False"];
 
     const choiceButtons = labels.map(choiceText => {
@@ -450,7 +578,14 @@ function show() {
       option.type = "button";
       option.className = "choice-option";
       option.textContent = choiceText;
-      option.dataset.correct = String(normalizeTypedAnswer(choiceText) === correctAnswer);
+      
+      const choiceNormalized = choiceText.toLowerCase();
+      const isMatch = (choiceNormalized === 'true' && correctAnswer === 'true') ||
+                      (choiceNormalized === 'false' && correctAnswer === 'false') ||
+                      (choiceNormalized === 'tama' && correctAnswer === 'tama') ||
+                      (choiceNormalized === 'mali' && correctAnswer === 'mali');
+
+      option.dataset.correct = String(isMatch);
       options.append(option);
       return option;
     });
@@ -592,36 +727,46 @@ if (getElement("shuffle")) {
   });
 }
 
-// --- 5. Export and Import JSON Flashcards ---
+// --- 6. Export and Import JSON Flashcards ---
 const exportBtn = getElement("export-cards-btn");
 const importBtn = getElement("import-cards-btn");
 const importFileInput = getElement("import-file-input");
 
 if (exportBtn) {
   exportBtn.addEventListener("click", () => {
-    cardActions.open = false;
+    const cardActionsMenu = getElement("card-actions");
+    if (cardActionsMenu) cardActionsMenu.open = false;
+
     if (cards.length === 0) {
       alert("No flashcards available to export. Generate or create cards first.");
       return;
     }
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ cards }, null, 2));
+
+    const jsonBlob = new Blob([JSON.stringify({ cards }, null, 2)], { type: "application/json" });
+    const blobUrl = URL.createObjectURL(jsonBlob);
+    
     const downloadAnchor = document.createElement("a");
-    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("href", blobUrl);
     downloadAnchor.setAttribute("download", `SAPC_Flashcards_${selectedSubjectMode}_${Date.now()}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    URL.revokeObjectURL(blobUrl);
   });
 }
 
 if (importBtn && importFileInput) {
-  importBtn.addEventListener("click", () => {
-    cardActions.open = false;
+  importBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    const cardActionsMenu = getElement("card-actions");
+    if (cardActionsMenu) cardActionsMenu.open = false;
+
+    importFileInput.value = "";
     importFileInput.click();
   });
 
   importFileInput.addEventListener("change", (event) => {
-    const file = event.target.files[0];
+    const file = event.target.files && event.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
@@ -634,29 +779,33 @@ if (importBtn && importFileInput) {
           cards = newCards;
           i = 0;
           saveCardsToStorage();
-          getElement("study").classList.remove("hidden");
-          getElement("status").textContent = `Successfully imported ${cards.length} cards from JSON!`;
+          const studyElement = getElement("study");
+          if (studyElement) studyElement.classList.remove("hidden");
+          const statusElement = getElement("status");
+          if (statusElement) statusElement.textContent = `Successfully imported ${cards.length} cards from JSON!`;
           show();
         } else {
           alert("Invalid flashcard JSON format. File must contain an array of cards with question and answer strings.");
         }
       } catch (err) {
         alert("Failed to parse JSON file: " + err.message);
-      } finally {
-        importFileInput.value = "";
       }
     };
+
+    reader.onerror = () => {
+      alert("Error reading file from storage.");
+    };
+
     reader.readAsText(file);
   });
 }
 
-// --- 6. Modal Management ---
+// --- 7. Modal Management ---
 const cardModal = getElement("card-modal");
 const modalTitle = getElement("modal-title");
 const modalQuestion = getElement("modal-question");
 const modalAnswer = getElement("modal-answer");
 const modalCardType = getElement("modal-card-type");
-const cardActions = getElement("card-actions");
 
 function inferCardType(card) {
   if (["identification", "multiple-choice", "enumeration", "true-false"].includes(card.type)) {
@@ -707,7 +856,9 @@ function openModal(isEdit = false) {
     getElement("modal-enumeration-answer").value = cardType === "enumeration"
       ? card.answer.split(/\r?\n/).map(line => line.replace(/^\s*\d+[.)]\s*/, "")).join("\n")
       : "";
-    getElement("modal-explanation").value = card.explanation || "";
+    getElement("modal-explanation").value = cardType === "true-false" ? (card.explanation || "") : "";
+    getElement("modal-mc-explanation").value = cardType === "multiple-choice" ? (card.explanation || "") : "";
+    
     const correctOption = card.answer.match(/^\s*([A-D])[.)]\s*/i)?.[1]?.toUpperCase() || "A";
     getElement("modal-correct-option").value = correctOption;
 
@@ -728,6 +879,7 @@ function openModal(isEdit = false) {
     modalAnswer.value = "";
     getElement("modal-enumeration-answer").value = "";
     getElement("modal-explanation").value = "";
+    getElement("modal-mc-explanation").value = "";
     ["a", "b", "c", "d"].forEach(letter => { getElement(`modal-option-${letter}`).value = ""; });
     getElement("modal-correct-option").value = "A";
     getElement("modal-true-false-answer").value = "True";
@@ -742,7 +894,8 @@ function closeModal() {
 
 if (getElement("manual-add-btn")) getElement("manual-add-btn").addEventListener("click", () => openModal(false));
 if (getElement("edit-card-btn")) getElement("edit-card-btn").addEventListener("click", () => {
-  cardActions.open = false;
+  const cardActionsMenu = getElement("card-actions");
+  if (cardActionsMenu) cardActionsMenu.open = false;
   openModal(true);
 });
 if (getElement("close-modal-btn")) getElement("close-modal-btn").addEventListener("click", closeModal);
@@ -760,9 +913,11 @@ if (getElement("save-card-btn")) {
       const choices = letters.map(letter => getElement(`modal-option-${letter.toLowerCase()}`).value.trim());
       if (choices.some(choice => !choice)) return alert("Please fill in all four choices.");
       const correctOption = getElement("modal-correct-option").value;
+      const mcExplanation = getElement("modal-mc-explanation").value.trim();
       card = {
         question: `${question}\n${choices.map((choice, index) => `${letters[index]}.${choice}`).join("\n")}`,
         answer: `${correctOption}. ${choices[letters.indexOf(correctOption)]}`,
+        explanation: mcExplanation,
         type: cardType
       };
     } else if (cardType === "enumeration") {
@@ -799,7 +954,9 @@ if (getElement("save-card-btn")) {
 
 if (getElement("delete-card-btn")) {
   getElement("delete-card-btn").addEventListener("click", () => {
-    cardActions.open = false;
+    const cardActionsMenu = getElement("card-actions");
+    if (cardActionsMenu) cardActionsMenu.open = false;
+
     if (cards.length === 0) return;
     if (confirm("Are you sure you want to delete this flashcard?")) {
       cards.splice(i, 1);
@@ -810,6 +967,32 @@ if (getElement("delete-card-btn")) {
         i = Math.max(0, i - 1);
         show();
       }
+    }
+  });
+}
+
+const clearAllCardsBtn = getElement("clear-all-cards-btn");
+
+if (clearAllCardsBtn) {
+  clearAllCardsBtn.addEventListener("click", () => {
+    const cardActionsMenu = getElement("card-actions");
+    if (cardActionsMenu) cardActionsMenu.open = false;
+
+    if (cards.length === 0) {
+      alert("No flashcards available to clear.");
+      return;
+    }
+
+    if (confirm("Are you sure you want to delete ALL flashcards? This action cannot be undone.")) {
+      cards = [];
+      i = 0;
+      localStorage.removeItem("sapc_flashcards");
+      
+      const studyElement = getElement("study");
+      if (studyElement) studyElement.classList.add("hidden");
+      
+      const statusElement = getElement("status");
+      if (statusElement) statusElement.textContent = "All flashcards have been cleared.";
     }
   });
 }
@@ -826,5 +1009,5 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft" && cards.length > 0) getElement("prev").click();
 });
 
-// Load saved flashcards on startup
+// Load saved cards on startup
 loadCardsFromStorage();

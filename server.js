@@ -1,14 +1,127 @@
 const express = require('express');
 const dotenv = require('dotenv');
+const sqlite3 = require('sqlite3').verbose();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 const { Groq } = require('groq-sdk');
 
 dotenv.config();
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
-
-// Serve static frontend assets from the public directory
 app.use(express.static('public'));
+
+const JWT_SECRET = process.env.JWT_SECRET || 'sapc_reviewer_secret_jwt_key_2026';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '831508871993-j7egn200ai4uvbqabkuka6s66juaikes.apps.googleusercontent.com';
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+// --- SQLite Database Setup ---
+const db = new sqlite3.Database('./database.sqlite', (err) => {
+  if (err) {
+    console.error('Failed to connect to SQLite database:', err.message);
+  } else {
+    console.log('Connected to SQLite database (database.sqlite).');
+  }
+});
+
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password TEXT,
+      is_google INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+});
+
+// Database Helper Promises
+const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+  db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
+});
+
+const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+  db.run(sql, params, function (err) {
+    return err ? reject(err) : resolve(this);
+  });
+});
+
+// --- Authentication Endpoints ---
+
+// 1. Register Account
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+
+    const existingUser = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Username is already taken.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await dbRun('INSERT INTO users (username, password, is_google) VALUES (?, ?, 0)', [username, hashedPassword]);
+
+    res.json({ message: 'User registered successfully! You can now log in.' });
+  } catch (err) {
+    console.error('Registration error:', err);
+    res.status(500).json({ error: 'Server error during registration.' });
+  }
+});
+
+// 2. Local Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const user = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
+
+    if (!user || user.is_google || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: 'Invalid username or password.' });
+    }
+
+    const token = jwt.sign({ username: user.username, id: user.id }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ message: 'Login successful', token, username: user.username });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error during login.' });
+  }
+});
+
+// 3. Google Sign-In
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ error: 'Google credential token missing.' });
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const email = payload.email;
+
+    let user = await dbGet('SELECT * FROM users WHERE username = ?', [email]);
+    if (!user) {
+      const result = await dbRun('INSERT INTO users (username, password, is_google) VALUES (?, NULL, 1)', [email]);
+      user = { id: result.lastID, username: email };
+    }
+
+    const token = jwt.sign({ username: email, id: user.id }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ message: 'Google login successful', token, username: email });
+  } catch (err) {
+    console.error('Google Auth Error:', err.message);
+    res.status(401).json({ error: 'Failed to authenticate Google account.' });
+  }
+});
+
+// --- Groq Flashcard API ---
 
 function missingKeyError(keyName) {
   const error = new Error(`${keyName} is missing. Add it to .env and restart the server.`);
@@ -42,12 +155,9 @@ function findCardsArray(data, depth = 0) {
 
 function cleanQuestionText(text) {
   if (typeof text !== 'string') return text;
-  
-  // Hard boundary split: cut off everything starting at the first occurrence of choice labels or merged verdicts
-  let cleaned = text.split(/(?:tama\s*(?:o|\/)?\s*mali|true\s*(?:or|\/)?\s*false|tamamali|truefalse|\b(tama|mali|true|false)\b)/i)[0];
-  
-  return cleaned
+  return text
     .replace(/^(\s*(true\s*(or|\/)?\s*false|tama\s*(o|\/)?\s*mali|t\s*\/\s*f)\s*[:.-]?\s*)+/gi, '')
+    .replace(/[\s(--]*\b(true\s*(or|\/)?\s*false|tama\s*(o|\/)?\s*mali|t\s*\/\s*f)\b[\s)]*$/gi, '')
     .replace(/[\s.:\-?]+$/, '?')
     .trim();
 }
@@ -224,7 +334,7 @@ app.post('/api/flashcards', async (req, res) => {
                              "Coverage and variety: " + diversityGuidance + "\n\n" +
                              "CRITICAL FORMAT RULES:\n" +
                              "1. Follow the card type mix for the selected difficulty.\n" +
-                             "2. For Multiple Choice, put the question and options A, B, C, and D in the \"question\" string on separate lines, and make \"answer\" the correct option string.\n" +
+                             "2. For Multiple Choice, put the question and options A, B, C, and D in the \"question\" string on separate lines, make \"answer\" the correct option string, and include an \"explanation\" field explaining why that answer is correct.\n" +
                              "3. For Identification, make \"question\" a clear prompt and \"answer\" the exact term or solution.\n" +
                              "4. For Enumeration, put numbered items only in \"answer\". Never include answer items in \"question\".\n" +
                              "5. For True/False (or Tama/Mali): Put ONLY the statement in \"question\". Do NOT add options or explanations into \"question\". Make \"answer\" strictly \"True\" or \"False\" (or \"Tama\" or \"Mali\"), and add a concise \"explanation\" field for reasoning.\n" +

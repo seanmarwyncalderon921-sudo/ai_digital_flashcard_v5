@@ -1,8 +1,8 @@
 {
   "name": "ai_digital_flashcard",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "SAPC AI Academic Reviewer",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -13,13 +13,11 @@
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "dotenv": "^18.0.8",
-    "express": "^5.3.0",
-    "google-auth-library": "^11.3.1",
-    "groq-sdk": "^1.6.0",
-    "jsonwebtoken": "^9.0.3",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "sharp": "^0.35.5"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "google-auth-library": "^9.10.0",
+    "groq-sdk": "^0.5.0",
+    "jsonwebtoken": "^9.0.2",
+    "sqlite3": "^5.1.7"
   }
 }
